@@ -233,6 +233,112 @@ function rect(size=1, rounding=0, chamfer=0, atype="box", anchor=CENTER, spin=0,
                        : reorient(anchor,spin, two_d=true, size=size, p=path, override=override);
 
 
+// Function&Module: rhomboid()
+// Synopsis: Creates a 2d rhomboid with optional corner rounding.
+// SynTags: Geom, Path
+// Topics: Shapes (2D), Paths (2D), Path Generators, Attachable
+// See Also: square(), rect()
+// Usage: As Module
+//   rhomboid(size, [rounding], [chamfer], ...) [ATTACHMENTS];
+// Usage: As Function
+//   path = rhomboid(size, [rounding], [chamfer], ...);
+// Description:
+//   When called as a module, creates a 2D rhomboid of the given size, with optional rounding or chamfering.
+//   When called as a function, returns a 2D path/list of points for a square/rectangle of the given size.
+// Arguments:
+//   size = The size of the rhomboid to create.  If given as a scalar, both X and Y will be the same size.
+//   ---
+
+module rhomboid(size=1, rounding=0, atype="box", chamfer=0, anchor=CENTER, spin=0) {
+    errchk = assert(in_list(atype, ["box", "perim"]));
+    size = [for (c = force_list(size,2)) max(0,c)];
+    if (!all_positive(size)) {
+        attachable(anchor,spin, two_d=true, size=size) {
+            union();
+            children();
+        }
+    } else if (rounding==0 && chamfer==0) {
+        attachable(anchor, spin, two_d=true, size=size) {
+            square(size, center=true);
+            children();
+        }
+    } else {
+        pts_over = rhomboid(size=size, rounding=rounding, chamfer=chamfer, atype=atype, _return_override=true);
+        pts = pts_over[0];
+        override = pts_over[1];
+        attachable(anchor, spin, two_d=true, size=size,override=override) {
+            polygon(pts);
+            children();
+        }
+    }
+}
+
+function rhomboid(size=1, rounding=0, chamfer=0, atype="box", anchor=CENTER, spin=0, _return_override) =
+    assert(is_num(size)     || is_vector(size,2))
+    assert(is_num(chamfer)  || is_vector(chamfer,4))
+    assert(is_num(rounding) || is_vector(rounding,4))
+    assert(in_list(atype, ["box", "perim"]))
+    let(
+        anchor=_force_anchor_2d(anchor),
+        size = [for (c = force_list(size,2)) max(0,c)],
+        chamfer = force_list(chamfer,4), 
+        rounding = force_list(rounding,4)
+    )
+    assert(all_nonnegative(size), "All components of size must be >=0")
+    all_zero(concat(chamfer,rounding),0) ?
+        let(
+             path = [
+                 [ size.x/2, -size.y/2],
+                 [-size.x/2, -size.y/2],
+                 [-size.x/2,  size.y/2],
+                 [ size.x/2,  size.y/2],
+             ]
+        )
+        rot(spin, p=move(-v_mul(anchor,size/2), p=path))
+    :
+    assert(all_zero(v_mul(chamfer,rounding),0), "Cannot specify chamfer and rounding at the same corner")
+    let(
+        quadorder = [3,2,1,0],
+        quadpos = [[1,1],[-1,1],[-1,-1],[1,-1]],
+        eps = 1e-9,
+        insets = [for (i=[0:3]) abs(chamfer[i])>=eps? chamfer[i] : abs(rounding[i])>=eps? rounding[i] : 0],
+        insets_x = max(insets[0]+insets[1],insets[2]+insets[3]),
+        insets_y = max(insets[0]+insets[3],insets[1]+insets[2])
+    )
+    assert(insets_x <= size.x, "Requested roundings and/or chamfers exceed the rect width.")
+    assert(insets_y <= size.y, "Requested roundings and/or chamfers exceed the rect height.")
+    let(
+        corners = [
+            for(i = [0:3])
+            let(
+                quad = quadorder[i],
+                qinset = insets[quad],
+                qpos = quadpos[quad],
+                qchamf = chamfer[quad],
+                qround = rounding[quad],
+                cverts = quant(segs(abs(qinset)),4)/4,
+                step = 90/cverts,
+                cp = v_mul(size/2-[qinset,abs(qinset)], qpos),
+                qpts = abs(qchamf) >= eps? [[0,abs(qinset)], [qinset,0]] :
+                    abs(qround) >= eps? [for (j=[0:1:cverts]) let(a=90-j*step) v_mul(polar_to_xy(abs(qinset),a),[sign(qinset),1])] :
+                    [[0,0]],
+                qfpts = [for (p=qpts) v_mul(p,qpos)],
+                qrpts = qpos.x*qpos.y < 0? reverse(qfpts) : qfpts,
+                cornerpt = atype=="box" || (qround==0 && qchamf==0) ? undef
+                         : qround<0 || qchamf<0 ? [[0,-qpos.y*min(qround,qchamf)]]
+                         : [for(seg=pair(qrpts)) let(isect=line_intersection(seg, [[0,0],qpos],SEGMENT,LINE)) if (is_def(isect) && isect!=seg[0]) isect]
+              )
+            assert(is_undef(cornerpt) || len(cornerpt)==1,"Cannot find corner point to anchor")
+            [move(cp, p=qrpts), is_undef(cornerpt)? undef : move(cp,p=cornerpt[0])]
+        ],
+        path = flatten(column(corners,0)),
+        override = [for(i=[0:3])
+                      let(quad=quadorder[i])
+                      if (is_def(corners[i][1])) [quadpos[quad], [corners[i][1], min(chamfer[quad],rounding[quad])<0 ? [quadpos[quad].x,0] : undef]]]
+      ) _return_override ? [reorient(anchor,spin, two_d=true, size=size, p=path, override=override), override]
+                       : reorient(anchor,spin, two_d=true, size=size, p=path, override=override);
+
+
 // Function&Module: circle()
 // Synopsis: Creates the approximation of a circle.
 // SynTags: Geom, Path, Ext
